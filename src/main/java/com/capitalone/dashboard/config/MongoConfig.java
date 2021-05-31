@@ -3,6 +3,7 @@ package com.capitalone.dashboard.config;
 import com.capitalone.dashboard.repository.RepositoryPackage;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientOptions;
+import com.mongodb.MongoClientURI;
 import com.mongodb.MongoCredential;
 import com.mongodb.ServerAddress;
 import org.slf4j.Logger;
@@ -45,6 +46,8 @@ public class MongoConfig extends AbstractMongoConfiguration {
     private int dbConnectTimeout;
     @Value("${dbsockettimeout:900000}")
     private int dbSocketTimeout;
+    @Value("${dburl:}")
+    private String dbUrl;
 
     @Override
     protected String getDatabaseName() {
@@ -58,6 +61,14 @@ public class MongoConfig extends AbstractMongoConfiguration {
         MongoClient client;
         LOGGER.info("ReplicaSet" + dbreplicaset);
 
+        if (!StringUtils.isEmpty(dbUrl)) {
+            LOGGER.info("DBURL specified.  Ignoring other DB settings");
+            MongoClientURI clientUri = new MongoClientURI(dbUrl);
+            databaseName = clientUri.getDatabase();
+            client = new MongoClient(clientUri);
+            LOGGER.info("Connecting to Mongo: {}", client);
+            return client;
+        }
         MongoClientOptions.Builder builder = new MongoClientOptions.Builder();
         builder.maxConnectionIdleTime(60000);
         builder.sslEnabled(Boolean.parseBoolean(dbssl));
