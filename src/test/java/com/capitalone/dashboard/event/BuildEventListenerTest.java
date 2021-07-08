@@ -77,11 +77,10 @@ public class BuildEventListenerTest {
     @Test
     public void buildSaved_addedToPipeline() {
         Build build = createBuild();
-        CollectorItem productCI = collectorItem();
-        Dashboard dashboard = createDashboard(HAS_BUILD_COLLECTOR, productCI);
+        Dashboard dashboard = createDashboard(HAS_BUILD_COLLECTOR);
         Pipeline pipeline = new Pipeline();
         setupFindDashboards(build, dashboard);
-        setupGetOrCreatePipeline(dashboard, pipeline, productCI);
+        setupGetOrCreatePipeline(dashboard, pipeline);
         eventListener.onAfterSave(new AfterSaveEvent<>(build, null, ""));
         Map<String,EnvironmentStage> pipelineMap = pipeline.getEnvironmentStageMap();
         Assert.assertEquals(pipelineMap.get("Build").getCommits().size(), 2);
@@ -91,12 +90,11 @@ public class BuildEventListenerTest {
     @Test
     public void buildSaved_addedToPipeline_commitStage() {
         Build build = createBuild();
-        CollectorItem productCI = collectorItem();
-        Dashboard dashboard = createDashboard(HAS_BUILD_COLLECTOR, productCI);
+        Dashboard dashboard = createDashboard(HAS_BUILD_COLLECTOR);
         Pipeline pipeline = new Pipeline();
         pipeline.addCommit(PipelineStage.COMMIT.getName(), createPipelineCommit("scmRev3"));
         setupFindDashboards(build, dashboard);
-        setupGetOrCreatePipeline(dashboard, pipeline, productCI);
+        setupGetOrCreatePipeline(dashboard, pipeline);
         List<Commit> commits = new ArrayList<>();
        commits.add(createCommit("scmRev3","http://github.com/scmurl"));
         when(commitRepository.findByScmRevisionNumber("scmRev3")).thenReturn(commits);
@@ -106,10 +104,10 @@ public class BuildEventListenerTest {
         verify(pipelineRepository).save(pipeline);
     }
 
-    private Dashboard createDashboard(boolean hasBuildCollector, CollectorItem productCI) {
+    private Dashboard createDashboard(boolean hasBuildCollector) {
         Component component = new Component();
         component.setId(ObjectId.get());
-        component.addCollectorItem(CollectorType.Product, productCI);
+        component.addCollectorItem(CollectorType.Product, collectorItem());
         if (hasBuildCollector) {
             component.addCollectorItem(CollectorType.Build, collectorItem());
         }
@@ -132,12 +130,16 @@ public class BuildEventListenerTest {
         when(dashboardRepository.findByApplicationComponentIdsIn(componentIds)).thenReturn(Collections.singletonList(dashboard));
     }
 
-    private void setupGetOrCreatePipeline(Dashboard dashboard, Pipeline pipeline, CollectorItem productCI) {
+    private void setupGetOrCreatePipeline(Dashboard dashboard, Pipeline pipeline) {
         Collector productCollector = new Collector();
         productCollector.setId(ObjectId.get());
+        CollectorItem teamDashboardCI = collectorItem();
+
         when(collectorRepository.findByCollectorType(CollectorType.Product))
                 .thenReturn(Collections.singletonList(productCollector));
-        when(pipelineRepository.findByCollectorItemId(productCI.getId())).thenReturn(pipeline);
+        when(collectorItemRepository.findTeamDashboardCollectorItemsByCollectorIdAndDashboardId(productCollector.getId(), dashboard.getId().toString()))
+                .thenReturn(teamDashboardCI);
+        when(pipelineRepository.findByCollectorItemId(teamDashboardCI.getId())).thenReturn(pipeline);
     }
 
     private CollectorItem collectorItem() {

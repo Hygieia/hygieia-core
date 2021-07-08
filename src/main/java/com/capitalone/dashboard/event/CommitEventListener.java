@@ -15,7 +15,6 @@ import com.capitalone.dashboard.repository.CollectorRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
 import com.capitalone.dashboard.repository.DashboardRepository;
 import com.capitalone.dashboard.repository.PipelineRepository;
-import org.apache.commons.collections.CollectionUtils;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.mapping.event.AfterSaveEvent;
@@ -45,7 +44,6 @@ public class CommitEventListener extends HygieiaMongoEventListener<Commit> {
     @Override
     public void onAfterSave(AfterSaveEvent<Commit> event) {
         Commit commit = event.getSource();
-
         // Add the commit to all pipelines associated with the team dashboards
         // this commit is part of. But only if there is a build collector item
         // configured on that dashboard. Otherwise, the commit will be orphaned
@@ -54,15 +52,11 @@ public class CommitEventListener extends HygieiaMongoEventListener<Commit> {
                 .stream()
                 .filter(this::dashboardHasBuildCollector)
                 .forEach(teamDashboard -> {
-                    if (CollectionUtils.isNotEmpty(teamDashboard.getApplication().getComponents()) &&  CommitType.New.equals(commit.getType())) {
+                    if (CommitType.New.equals(commit.getType())) {
+                        Pipeline pipeline = getOrCreatePipeline(teamDashboard);
                         PipelineCommit pipelineCommit = new PipelineCommit(commit, commit.getScmCommitTimestamp());
-                        Component component = teamDashboard.getApplication().getComponents().get(0);
-                        List<CollectorItem> productCIs = component.getCollectorItems(CollectorType.Product);
-                        for (CollectorItem productCI : productCIs) {
-                            Pipeline pipeline = getOrCreatePipeline(productCI);
-                            pipeline.addCommit(PipelineStage.COMMIT.getName(), pipelineCommit);
-                            pipelineRepository.save(pipeline);
-                        }
+                        pipeline.addCommit(PipelineStage.COMMIT.getName(), pipelineCommit);
+                        pipelineRepository.save(pipeline);
                     }
                 });
     }

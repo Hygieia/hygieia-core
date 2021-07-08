@@ -5,7 +5,6 @@ import com.capitalone.dashboard.model.BaseModel;
 import com.capitalone.dashboard.model.Build;
 import com.capitalone.dashboard.model.BuildStatus;
 import com.capitalone.dashboard.model.CollectorItem;
-import com.capitalone.dashboard.model.CollectorType;
 import com.capitalone.dashboard.model.Component;
 import com.capitalone.dashboard.model.Dashboard;
 import com.capitalone.dashboard.model.Pipeline;
@@ -18,10 +17,10 @@ import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
 import com.capitalone.dashboard.repository.DashboardRepository;
 import com.capitalone.dashboard.repository.PipelineRepository;
+
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.mapping.event.AfterSaveEvent;
-import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +36,7 @@ public class BuildEventListener extends HygieiaMongoEventListener<Build> {
     private final ComponentRepository componentRepository;
     private final CommitRepository commitRepository;
     private final SyncDashboard syncDashboard;
-
+    
     @Autowired
     public BuildEventListener(DashboardRepository dashboardRepository,
                               CollectorItemRepository collectorItemRepository,
@@ -72,15 +71,9 @@ public class BuildEventListener extends HygieiaMongoEventListener<Build> {
     private void processFailedBuild(Build failedBuild) {
         List<Dashboard> teamDashboardsReferencingBuild = findAllDashboardsForBuild(failedBuild);
         for (Dashboard teamDashboard : teamDashboardsReferencingBuild) {
-            List<Component> components = teamDashboard.getApplication().getComponents();
-            if(CollectionUtils.isEmpty(components)) { continue; }
-            Component component = components.get(0);
-            List<CollectorItem> productCIs = component.getCollectorItems(CollectorType.Product);
-            for(CollectorItem productCI : productCIs) {
-                Pipeline pipeline = getOrCreatePipeline(productCI);
-                pipeline.addFailedBuild(failedBuild);
-                pipelineRepository.save(pipeline);
-            }
+            Pipeline pipeline = getOrCreatePipeline(teamDashboard);
+            pipeline.addFailedBuild(failedBuild);
+            pipelineRepository.save(pipeline);
         }
     }
 
@@ -92,38 +85,34 @@ public class BuildEventListener extends HygieiaMongoEventListener<Build> {
      */
     private void processBuild(Build build) {
         List<Dashboard> teamDashboardsReferencingBuild = findAllDashboardsForBuild(build);
-
         //for every team dashboard referencing the build, find the pipeline, put this commit in the build stage
         for (Dashboard teamDashboard : teamDashboardsReferencingBuild) {
-            List<Component> components = teamDashboard.getApplication().getComponents();
-            if(CollectionUtils.isEmpty(components)) { continue; }
-            Component component = components.get(0);
-            List<CollectorItem> productCIs = component.getCollectorItems(CollectorType.Product);
-            for(CollectorItem productCI : productCIs) {
-                Pipeline pipeline = getOrCreatePipeline(productCI);
-                for (SCM scm : build.getSourceChangeSet()) {
-                    // we want to use the build start time since the timestamp was just the time that the collector ran
-                    PipelineCommit commit = new PipelineCommit(scm, build.getStartTime());
+            Pipeline pipeline = getOrCreatePipeline(teamDashboard);    
+            for (SCM scm : build.getSourceChangeSet()) {
+                // we want to use the build start time since the timestamp was just the time that the collector ran
+                PipelineCommit commit = new PipelineCommit(scm, build.getStartTime());
+                pipeline.addCommit(PipelineStage.BUILD.getName(), commit);
+            }
+
+            processPreviousFailedBuilds(build, pipeline);
+
+            /**
+             * If some build events are missed, here is an attempt to move commits to the build stage
+             * This also takes care of the problem with Jenkins first build change set being empty.
+             *
+             * Logic:
+             * If the build start time is after the scm commit, move the commit to build stage. Match the repo at the very least.
+             */
+            Map<String, PipelineCommit> commitStageCommits = pipeline.getCommitsByEnvironmentName(PipelineStage.COMMIT.getName());
+            Map<String, PipelineCommit> buildStageCommits = pipeline.getCommitsByEnvironmentName(PipelineStage.BUILD.getName());
+            for (String rev : commitStageCommits.keySet()) {
+                PipelineCommit commit = commitStageCommits.get(rev);
+                if ((commit.getScmCommitTimestamp() < build.getStartTime()) && !buildStageCommits.containsKey(rev) && isMoveCommitToBuild(build, commit, commitRepository)) {
                     pipeline.addCommit(PipelineStage.BUILD.getName(), commit);
                 }
-                processPreviousFailedBuilds(build, pipeline);
-                /*
-                 * If some build events are missed, here is an attempt to move commits to the build stage
-                 * This also takes care of the problem with Jenkins first build change set being empty.
-                 *
-                 * Logic:
-                 * If the build start time is after the scm commit, move the commit to build stage. Match the repo at the very least.
-                 */
-                Map<String, PipelineCommit> commitStageCommits = pipeline.getCommitsByEnvironmentName(PipelineStage.COMMIT.getName());
-                Map<String, PipelineCommit> buildStageCommits = pipeline.getCommitsByEnvironmentName(PipelineStage.BUILD.getName());
-                for (Map.Entry<String, PipelineCommit> e : commitStageCommits.entrySet()) {
-                    PipelineCommit commit = e.getValue();
-                    if ((commit.getScmCommitTimestamp() < build.getStartTime()) && !buildStageCommits.containsKey(e.getKey()) && isMoveCommitToBuild(build, commit, commitRepository)) {
-                        pipeline.addCommit(PipelineStage.BUILD.getName(), commit);
-                    }
-                }
-                pipelineRepository.save(pipeline);
             }
+            pipelineRepository.save(pipeline);
+
         }
     }
 

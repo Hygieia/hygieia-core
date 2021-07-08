@@ -219,6 +219,8 @@ public class CommitEventListenerTest {
 
         when(collectorRepository.findByCollectorType(CollectorType.Product))
                 .thenReturn(Collections.singletonList(productCollector));
+        when(collectorItemRepository.findTeamDashboardCollectorItemsByCollectorIdAndDashboardId(productCollector.getId(), dashboard.getId().toString()))
+        .thenReturn(teamDashboardCI);
         when(pipelineRepository.findByCollectorItemId(teamDashboardCI.getId())).thenReturn(pipeline);
     }
 
